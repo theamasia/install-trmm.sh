@@ -120,16 +120,56 @@ fi
 # Download Tactical RMM agent
 print_status "Downloading Tactical RMM agent..."
 
-# Get the latest release URL
-LATEST_RELEASE=$(curl -s https://api.github.com/repos/amidaware/rmmagent/releases/latest | grep "browser_download_url.*${AGENT_ARCH}\.tar\.gz" | cut -d '"' -f 4 | head -1)
+# Get the latest release URL - try multiple methods
+print_status "Fetching latest release information..."
+
+# Method 1: Try with correct pattern for rmmagent releases
+LATEST_RELEASE=$(curl -s https://api.github.com/repos/amidaware/rmmagent/releases/latest | grep -o "https://github.com/amidaware/rmmagent/releases/download/[^\"]*linux-${AGENT_ARCH}\.tar\.gz" | head -1)
+
+# Method 2: If that fails, try alternative pattern
+if [ -z "$LATEST_RELEASE" ]; then
+    print_warning "Trying alternative download pattern..."
+    LATEST_RELEASE=$(curl -s https://api.github.com/repos/amidaware/rmmagent/releases/latest | grep -o "https://[^\"]*rmmagent[^\"]*linux[^\"]*${AGENT_ARCH}[^\"]*\.tar\.gz" | head -1)
+fi
+
+# Method 3: If still failing, try direct URL construction with latest version
+if [ -z "$LATEST_RELEASE" ]; then
+    print_warning "Attempting to construct download URL..."
+    # Get the latest version tag
+    LATEST_VERSION=$(curl -s https://api.github.com/repos/amidaware/rmmagent/releases/latest | grep '"tag_name"' | cut -d '"' -f 4)
+    if [ ! -z "$LATEST_VERSION" ]; then
+        LATEST_RELEASE="https://github.com/amidaware/rmmagent/releases/download/${LATEST_VERSION}/rmmagent-linux-${AGENT_ARCH}.tar.gz"
+        print_status "Constructed URL with version ${LATEST_VERSION}"
+    fi
+fi
+
+# Method 4: If all API methods fail, use a known working version
+if [ -z "$LATEST_RELEASE" ]; then
+    print_warning "GitHub API might be rate-limited or changed. Using fallback version..."
+    FALLBACK_VERSION="v2.7.0"  # Update this periodically
+    LATEST_RELEASE="https://github.com/amidaware/rmmagent/releases/download/${FALLBACK_VERSION}/rmmagent-linux-${AGENT_ARCH}.tar.gz"
+    print_warning "Using fallback version ${FALLBACK_VERSION}"
+fi
 
 if [ -z "$LATEST_RELEASE" ]; then
-    print_error "Could not find latest release for architecture: $AGENT_ARCH"
+    print_error "Could not determine download URL for architecture: $AGENT_ARCH"
+    print_error "Please check: https://github.com/amidaware/rmmagent/releases"
+    print_error "You can manually download and install the agent if needed."
     exit 1
 fi
 
 print_status "Downloading from: $LATEST_RELEASE"
-wget -q "$LATEST_RELEASE" -O rmmagent.tar.gz
+if ! wget -q "$LATEST_RELEASE" -O rmmagent.tar.gz; then
+    print_error "Failed to download agent from $LATEST_RELEASE"
+    print_error "Please check your internet connection and try again."
+    exit 1
+fi
+
+# Verify the download
+if [ ! -f rmmagent.tar.gz ] || [ ! -s rmmagent.tar.gz ]; then
+    print_error "Downloaded file is empty or missing"
+    exit 1
+fi
 
 # Extract agent
 print_status "Extracting agent..."
